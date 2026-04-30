@@ -11,8 +11,25 @@ SESSION_ID = os.getenv("SESSION_ID")
 LANGUAGE = os.getenv("LANGUAGE")
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credential_path
 
+
+EMOTION_MAP = {
+    "happy_response": "HAPPY",
+    "neutral_response": "NEUTRAL",
+    "angry_response": "ANGRY",
+    "Default Welcome Intent": "HAPPY",
+    "Default Fallback Intent": "NEUTRAL",
+}
+
+# Stores current emotion state
+current_emotion = "NEUTRAL"
+
+# Run this once to see all microphones
+"""for index, name in enumerate(sr.Microphone.list_microphone_names()):
+    print(f"{index}: {name}")"""
+
 # --- Text input function ---
 def detect_intent_texts(project_id, session_id, texts, language_code):
+    global current_emotion
     session_client = dialogflow.SessionsClient()
     session = session_client.session_path(project_id, session_id)
     print("Session path: {}\n".format(session))
@@ -23,18 +40,20 @@ def detect_intent_texts(project_id, session_id, texts, language_code):
         response = session_client.detect_intent(
             request={"session": session, "query_input": query_input}
         )
+        intent_name = response.query_result.intent.display_name
+        confidence = response.query_result.intent_detection_confidence
+        current_emotion = EMOTION_MAP.get(intent_name, "NEUTRAL")
+
         print("=" * 20)
         print("Query text: {}".format(response.query_result.query_text))
-        print("Detected intent: {} (confidence: {})\n".format(
-            response.query_result.intent.display_name,
-            response.query_result.intent_detection_confidence,
-        ))
+        print(f"Detected intent: {intent_name} (confidence: {confidence})\n")
+        print(f"Emotion state: {current_emotion}")
         print("Fulfillment text: {}\n".format(response.query_result.fulfillment_text))
 
 # --- Voice input function ---
 def detect_intent_voice(project_id, session_id, language_code):
     recognizer = sr.Recognizer()
-    with sr.Microphone() as source:
+    with sr.Microphone(device_index=1) as source:
         print("🔧 Adjusting for background noise... please wait")
         recognizer.adjust_for_ambient_noise(source, duration=2)
         print("🎤 Speak now clearly...")
