@@ -18,6 +18,7 @@ EMOTION_MAP = {
     "angry_response": "ANGRY",
     "Default Welcome Intent": "HAPPY",
     "Default Fallback Intent": "NEUTRAL",
+    "exit_robot" : "QUIT"
 }
 
 # Stores current emotion state
@@ -55,32 +56,33 @@ def detect_intent_voice(project_id, session_id, language_code):
     recognizer = sr.Recognizer()
     with sr.Microphone(device_index=1) as source:
         print("🔧 Adjusting for background noise... please wait")
-        recognizer.adjust_for_ambient_noise(source, duration=2)
+        recognizer.adjust_for_ambient_noise(source, duration=1)
         print("🎤 Speak now clearly...")
         try:
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=7)
             print("Processing your speech...")
         except sr.WaitTimeoutError:
             print("❌ No speech detected. Try again.")
-            return
+            return None
 
     try:
         spoken_text = recognizer.recognize_google(audio)
         print(f"✅ You said: {spoken_text}")
         detect_intent_texts(project_id, session_id, [spoken_text], language_code)
+        return spoken_text
     except sr.UnknownValueError:
         print("❌ Could not understand. Please speak louder and more clearly.")
+        return None
     except sr.RequestError as e:
         print(f"❌ Google API error: {e}")
+        return None
 
 # --- RUN ---
-print("Choose test mode:")
-print("1 - Type text")
-print("2 - Use microphone")
-choice = input("Enter 1 or 2: ")
+print("Robot is ready! Start Speaking")
 
-if choice == "1":
-    text = input("Type something: ")
-    detect_intent_texts(PROJECT_ID, SESSION_ID, [text], LANGUAGE)
-elif choice == "2":
-    detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
+while True:
+    spoken_text = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
+
+    if current_emotion == "QUIT":
+        print("Shutting down")
+        break
