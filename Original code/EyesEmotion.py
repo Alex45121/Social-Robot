@@ -2,9 +2,17 @@ import os
 import speech_recognition as sr
 from google.cloud import dialogflow
 from dotenv import load_dotenv
+import serial
+import time
+import sounddevice as sd
+from scipy.io.wavfile import write
+
+ser = serial.Serial('COM4', 115200)  # change COM port!
+time.sleep(2)
 
 # --- Load settings from .env file ---
 load_dotenv()
+
 credential_path = os.getenv("CREDENTIAL_PATH")
 PROJECT_ID = os.getenv("PROJECT_ID")
 SESSION_ID = os.getenv("SESSION_ID")
@@ -54,28 +62,40 @@ def detect_intent_texts(project_id, session_id, texts, language_code):
 # --- Voice input function ---
 def detect_intent_voice(project_id, session_id, language_code):
     recognizer = sr.Recognizer()
-    with sr.Microphone(device_index=1) as source:
-        print("🔧 Adjusting for background noise... please wait")
-        recognizer.adjust_for_ambient_noise(source, duration=1)
-        print("🎤 Speak now clearly...")
-        try:
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=7)
-            print("Processing your speech...")
-        except sr.WaitTimeoutError:
-            print("❌ No speech detected. Try again.")
-            return None
+
+    # --- record audio using sounddevice ---
+    samplerate = 16000
+    duration = 6
+
+    print("🎤 Recording... speak now")
+    audio = sd.rec(int(duration * samplerate),
+                   samplerate=samplerate,
+                   channels=1,
+                   dtype='int16')
+    sd.wait()
+
+    wav_path = "temp.wav"
+    write(wav_path, samplerate, audio)
+    print("✅ Recording saved, processing...")
+
+    # --- SpeechRecognition (unchanged logic) ---
+    with sr.AudioFile(wav_path) as source:
+        audio_data = recognizer.record(source)
 
     try:
-        spoken_text = recognizer.recognize_google(audio)
+        spoken_text = recognizer.recognize_google(audio_data)
         print(f"✅ You said: {spoken_text}")
         detect_intent_texts(project_id, session_id, [spoken_text], language_code)
         return spoken_text
+
     except sr.UnknownValueError:
         print("❌ Could not understand. Please speak louder and more clearly.")
         return None
+
     except sr.RequestError as e:
         print(f"❌ Google API error: {e}")
         return None
+
 
 # --- RUN ---
 print("Robot is ready! Start Speaking")
@@ -83,6 +103,6 @@ print("Robot is ready! Start Speaking")
 while True:
     spoken_text = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
 
-    if current_emotion == "QUIT":
-        print("Shutting down")
-        break
+    if current_emotion != "QUIT":
+        ser.write((current_emotion + "\n").encode())
+        print("Arduino: ", current_emotion)

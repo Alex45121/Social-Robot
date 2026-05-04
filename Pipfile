@@ -1,0 +1,18 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+speechrecognition = "==3.16.1"
+dotenv = "==0.9.9"
+serial = "==0.0.97"
+google-cloud-dialogflow = "==2.47.0"
+pyserial = "==3.5"
+sounddevice = "*"
+scipy = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.14"
