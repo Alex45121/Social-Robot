@@ -60,7 +60,9 @@ def detect_intent_texts(project_id, session_id, texts, language_code):
         print("Fulfillment text: {}\n".format(response.query_result.fulfillment_text))
 
 # --- Voice input function ---
+# --- Voice input function ---
 def detect_intent_voice(project_id, session_id, language_code):
+    global current_emotion
     recognizer = sr.Recognizer()
 
     # --- record audio using sounddevice ---
@@ -78,14 +80,36 @@ def detect_intent_voice(project_id, session_id, language_code):
     write(wav_path, samplerate, audio)
     print("✅ Recording saved, processing...")
 
-    # --- SpeechRecognition (unchanged logic) ---
+    # --- SpeechRecognition ---
     with sr.AudioFile(wav_path) as source:
         audio_data = recognizer.record(source)
 
     try:
         spoken_text = recognizer.recognize_google(audio_data)
         print(f"✅ You said: {spoken_text}")
-        detect_intent_texts(project_id, session_id, [spoken_text], language_code)
+
+        # Convert to lowercase for easier checking
+        spoken_text_lower = spoken_text.lower()
+
+        # Manual emotion overrides
+        if "angry" in spoken_text_lower:
+            current_emotion = "A"
+
+        elif "happy" in spoken_text_lower:
+            current_emotion = "H"
+
+        elif "neutral" in spoken_text_lower:
+            current_emotion = "N"
+
+        elif "quit" in spoken_text_lower:
+            current_emotion = "QUIT"
+
+        else:
+            # Use Dialogflow normally
+            detect_intent_texts(project_id, session_id, [spoken_text], language_code)
+
+        print(f"Emotion state: {current_emotion}")
+
         return spoken_text
 
     except sr.UnknownValueError:
