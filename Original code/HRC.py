@@ -1,4 +1,6 @@
-2import os
+import sys
+sys.stdout.reconfigure(encoding='utf-8')
+import os
 import speech_recognition as sr
 from google.cloud import dialogflow
 from dotenv import load_dotenv
