@@ -15,12 +15,14 @@ os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credential_path
 
 
 EMOTION_MAP = {
-    "happy_response": "HAPPY",
-    "neutral_response": "NEUTRAL",
-    "angry_response": "ANGRY",
-    "Default Welcome Intent": "HAPPY",
-    "Default Fallback Intent": "NEUTRAL",
-    "exit_robot" : "QUIT"
+    "happy_response":       "H",
+    "neutral_response":     "N",
+    "angry_response":       "A",
+    "scared_response":      "S",
+    "sad_response":         "E",
+    "question_response":    "Q",
+    "welcome_response":     "W",
+    "exit_robot" :          "X"
 }
 
 # Stores current emotion state
@@ -29,6 +31,15 @@ current_emotion = "NEUTRAL"
 # Run this once to see all microphones
 """for index, name in enumerate(sr.Microphone.list_microphone_names()):
     print(f"{index}: {name}")"""
+
+def resposne(current_emotion):
+        
+        if current_emotion == "NEUTRAL":
+            print("N")
+
+
+
+        return 
 
 # --- Text input function ---
 def detect_intent_texts(project_id, session_id, texts, language_code):
