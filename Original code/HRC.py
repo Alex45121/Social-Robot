@@ -6,6 +6,10 @@ from google.cloud import dialogflow
 from dotenv import load_dotenv
 import pygame
 pygame.mixer.init()
+import serial
+import time
+COM_PORT = "COM3"   
+
 
 # --- Load settings from .env file ---
 load_dotenv()
@@ -130,10 +134,11 @@ def detect_intent_voice(project_id, session_id, language_code):
 # --- RUN ---
 print("Robot is ready! Start Speaking")
 
-while True:
-    spoken_text = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
-    resposne(current_emotion)
-
-    if current_emotion == "QUIT":
-        print("Shutting down")
-        break
+if __name__ == "__main__":
+    print("Robot is ready! Start Speaking")
+    while True:
+        spoken_text = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
+        resposne(current_emotion)
+        if current_emotion == "QUIT":
+            print("Shutting down")
+            break
