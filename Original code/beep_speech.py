@@ -2,9 +2,6 @@
 beep_speech.py
 Converts DialogFlow fulfillment text into a pitch-modulated "beep speech" WAV.
  
-Takes the data your pipeline already has:
-  - Fulfillment text  (e.g. "Hello! How can I help you?")
-  - Emotion state     (e.g. "Neutral", "Happy", "Angry"...)
  
 It does NOT speak words. It maps each word to a beep and shapes the pitch
 contour using punctuation, word position and emotion, so the result sounds
@@ -39,7 +36,6 @@ EMOTION_PROFILES = {
     "scared":     dict(base_pitch=480, pitch_range=180, tempo=0.09, waveform="saw"),
     "question":   dict(base_pitch=340, pitch_range=160, tempo=0.15, waveform="square"),
     "welcome":    dict(base_pitch=400, pitch_range=220, tempo=0.13, waveform="square"),
-    # a soft, warm, slow profile for comforting an upset user
     "comforting": dict(base_pitch=250, pitch_range=90,  tempo=0.22, waveform="sine"),
 }
  
@@ -70,15 +66,7 @@ def _silence(duration):
  
  
 def text_to_beeps(text, emotion="neutral"):
-    """
-    Convert fulfillment text into a beep-speech waveform (numpy array).
- 
-    The pitch CONTOUR follows the sentence:
-      - rises toward the end if it's a question ('?')
-      - falls toward the end for a statement ('.')
-      - longer words get slightly longer beeps
-      - emotion sets the overall pitch, range, tempo and timbre
-    """
+
     profile = EMOTION_PROFILES.get(str(emotion).lower(), EMOTION_PROFILES["neutral"])
  
     is_question = "?" in text
@@ -127,12 +115,7 @@ def save_wav(waveform, path):
  
  
 def speak_beeps(text, emotion="neutral", out_path="robot_reply.wav"):
-    """
-    Generate beep speech from text + emotion, save it, and play it
-    through pygame (the same mixer your HRC.py already initialised).
- 
-    Call this instead of playing a pre-recorded mp3.
-    """
+  
     import pygame  # already initialised in HRC.py via pygame.mixer.init()
  
     # nothing to say -> don't crash, just skip

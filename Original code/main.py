@@ -5,6 +5,8 @@ import HRC
 
 state = "IDLE"
 
+turn_on = True
+
 while True:
     if state == "IDLE":
         if face_detection() == True:
@@ -17,3 +19,4 @@ while True:
         if face_detection() == False:  
             print("No person detected - Stops responding")    # person walked away
             state = "IDLE"
+
