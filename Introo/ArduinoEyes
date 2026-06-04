@@ -1,0 +1,227 @@
+// Created with the help of AI
+#include <Adafruit_NeoPixel.h>
+#include <SoftwareSerial.h>
+#include "KT403A_Player.h"
+
+// ---------------- PIN SETUP ----------------
+#define LED_PIN 4
+#define NUMPIXELS 74
+
+SoftwareSerial mp3(2, 3);  // RX, TX
+KT403A<SoftwareSerial> Mp3Player;
+
+Adafruit_NeoPixel pixels(NUMPIXELS, LED_PIN);
+
+int LED_BRIGHTNESS = 8;
+unsigned long last_blink_trigger = 0;
+int blink_interval = 4500;
+
+// ---------------- EMOTIONS ----------------
+enum Emotion { NEUTRAL,
+               QUESTIONING,
+               COMFORT,
+               HAPPY,
+               SAD,
+               FROWN,
+               BREATHE };
+
+Emotion emotion = NEUTRAL;
+
+// ---------------- BLINK ----------------
+bool do_blink = false;
+int blink_step = 0;
+unsigned long blink_timer = 0;
+
+// ---------------- EYE PATTERNS ----------------
+byte neutral[]     = { B0000, B01110, B011110, B0111110, B011110, B01110, B0000 };
+byte blink1[]      = { B0000, B00000, B011110, B0111110, B011110, B00000, B0000 };
+byte blink2[]      = { B0000, B00000, B000000, B1111111, B000000, B00000, B0000 };
+
+byte questioning[] = { B1111, B11111, B111111, B1111111, B111111, B11111, B1111 };
+byte comfort[]     = { B0000, B00000, B100001, B1100011, B111111, B11111, B1111 };
+byte happy[]       = { B1111, B11111, B111111, B1100011, B000000, B00000, B0000 };
+byte sad[]         = { B0000, B00001, B000011, B0001111, B011111, B11111, B1111 };
+byte frown[]       = { B0000, B00000, B100000, B1110000, B111000, B11111, B1111 };
+
+// Larger, softer breathing eye shape
+byte breathe[]     = { B0000, B00100, B011110, B0111110, B011110, B00100, B0000 };
+
+// ---------------- SETUP ----------------
+void setup() {
+  pixels.begin();
+  pixels.clear();
+  pixels.show();
+
+  Serial.begin(115200);
+
+  // MP3 INIT
+  mp3.begin(9600);
+  delay(1000);
+  Mp3Player.init(mp3);
+  Mp3Player.volume(30);
+
+  randomSeed(analogRead(A0));
+
+  Serial.println("Robot Ready");
+}
+
+// ---------------- LOOP ----------------
+void loop() {
+  communication();
+  run_eyes();
+}
+
+// ---------------- SERIAL COMMUNICATION ----------------
+void communication() {
+  if (Serial.available()) {
+
+    String data = Serial.readStringUntil('\n');
+    data.trim();
+
+    if (data.length() == 0) return;
+
+    Serial.print("Received: ");
+    Serial.println(data);
+
+    Emotion previous = emotion;
+
+    if (data == "N") emotion = NEUTRAL;
+    else if (data == "Q") emotion = QUESTIONING;
+    else if (data == "C") emotion = COMFORT;
+    else if (data == "H") emotion = HAPPY;
+    else if (data == "S") emotion = SAD;
+    else if (data == "F") emotion = FROWN;
+    else if (data == "B") emotion = BREATHE;
+
+    // Optional sound trigger
+    // if (emotion != previous) {
+    //   playEmotionSound(emotion);
+    // }
+  }
+}
+
+/*
+// ---------------- SOUND ----------------
+void playEmotionSound(Emotion e) {
+  switch (e) {
+    case HAPPY:   Mp3Player.playSongIndex(3); break;
+    case FROWN:   Mp3Player.playSongIndex(2); break;
+    case NEUTRAL: Mp3Player.playSongIndex(1); break;
+  }
+}
+*/
+
+// ---------------- EMOTION COLORS ----------------
+int getEmotionHue(Emotion e) {
+  switch (e) {
+    case NEUTRAL:     return 110; // calm blue
+    case QUESTIONING: return 45;  // yellow
+    case COMFORT:     return 95;  // soft green
+    case HAPPY:       return 35;  // warm orange/yellow
+    case SAD:         return 160; // deeper blue
+    case FROWN:       return 15;   // red
+    case BREATHE:     return 145; // soft cyan-blue
+  }
+
+  return 170;
+}
+
+// ---------------- BREATHING ANIMATION ----------------
+int getBreathingBrightness() {
+  // 8-second breathing cycle: 4 sec inhale, 4 sec exhale
+  unsigned long cycle = millis() % 8000;
+  float phase = cycle / 8000.0;
+
+  // Smooth wave from dim to bright to dim
+  float wave = (sin(phase * TWO_PI - HALF_PI) + 1.0) / 2.0;
+
+  // Brightness range
+  return 2 + wave * 16;
+}
+
+// ---------------- BLINK TRIGGER ----------------
+void trigger_blink() {
+  do_blink = true;
+  blink_step = 0;
+  blink_timer = millis();
+}
+
+// ---------------- MAIN EYE LOGIC ----------------
+void run_eyes() {
+  pixels.clear();
+
+  // No blinking during breathing mode
+  if (emotion != BREATHE &&
+      !do_blink &&
+      millis() - last_blink_trigger > blink_interval) {
+
+    trigger_blink();
+    last_blink_trigger = millis();
+    blink_interval = random(3500, 7000);
+  }
+
+  int hue = getEmotionHue(emotion);
+
+  // Breathing brightness animation
+  if (emotion == BREATHE && !do_blink) {
+    LED_BRIGHTNESS = getBreathingBrightness();
+  } else {
+    LED_BRIGHTNESS = 8;
+  }
+
+  // ---- BLINK OVERRIDE ----
+  if (do_blink) {
+    unsigned long elapsed = millis() - blink_timer;
+
+    if (elapsed < 100) {
+      display_eyes(blink1, hue);
+    } else if (elapsed < 220) {
+      display_eyes(blink2, hue);
+    } else if (elapsed < 340) {
+      display_eyes(blink1, hue);
+    } else {
+      do_blink = false;
+    }
+
+    pixels.show();
+    return;
+  }
+
+  // ---- EMOTION DISPLAY ----
+  switch (emotion) {
+    case NEUTRAL:     display_eyes(neutral, hue);     break;
+    case QUESTIONING: display_eyes(questioning, hue); break;
+    case COMFORT:     display_eyes(comfort, hue);     break;
+    case HAPPY:       display_eyes(happy, hue);       break;
+    case SAD:         display_eyes(sad, hue);         break;
+    case FROWN:       display_eyes(frown, hue);       break;
+    case BREATHE:     display_eyes(breathe, hue);     break;
+  }
+
+  pixels.show();
+}
+
+// ---------------- DRAW EYES ----------------
+void display_eyes(byte arr[], int hue) {
+  display_eye(arr, hue, true);
+  display_eye(arr, hue, false);
+}
+
+void display_eye(byte arr[], int hue, bool left) {
+  int rows[] = { 4, 5, 6, 7, 6, 5, 4 };
+  int index = (left) ? 0 : 37;
+
+  for (int i = 0; i < 7; i++) {
+    for (int j = 0; j < rows[i]; j++) {
+
+      int brightness = LED_BRIGHTNESS * bitRead(arr[i], (left) ? rows[i] - 1 - j : j);
+
+      pixels.setPixelColor(
+        index,
+        pixels.ColorHSV(hue * 256, 255, brightness)
+      );
+
+      index++;
+    }
+  }
+}
