@@ -26,14 +26,15 @@ enum Emotion {NEUTRAL, SUPRISED, HAPPY, ANGRY, SAD};
 Emotion emotion = NEUTRAL;
 
 Servo servo1, servo2;
-float servo1_pos = 90, servo2_pos = 90;
-float servo1_target = 90, servo2_target = 90;
+float servo1_pos = 20, servo2_pos = 90;
+float servo1_target = 20, servo2_target = 90;
 float servo1_speed = 0, servo2_speed = 0;
+float smoothX = 160, smoothY = 120;
 
-long timer1, timer2;
+long timer1, timer2, timer3;
 
 bool pc_connected = false;
-float servo1_target_pc = 90, servo2_target_pc = 90;
+float servo1_target_pc = 20, servo2_target_pc = 90;
 
 // ---------------- EYE PATTERNS ----------------
 byte neutral[] = {B0000,B01110,B011110,B0111110,B011110,B01110,B0000};
@@ -66,8 +67,9 @@ void setup() {
 
   servo1.attach(SERVO_PIN_1);
   servo2.attach(SERVO_PIN_2);
-  servo1.write(90);
+  servo1.write(20);
   servo2.write(90);
+  
 }
 
 // ---------------- LOOP ----------------
@@ -84,6 +86,11 @@ void loop() {
     timer2 = millis();
     communication();
   }
+
+  //if (millis() - timer3 >= 100) {
+  //timer3 = millis();
+  //Serial.println(face_detected ? "FACE:1" : "FACE:0");
+  //}
 }
 
 // ---------------- TOUCH ----------------
@@ -106,7 +113,11 @@ void touch_sensor() {
 
 // ---------------- EMOTIONS ----------------
 void run_emotions(){
-  pixels.clear();  
+  pixels.clear();
+  Serial.print("EMOTION=");
+  Serial.print(emotion);
+  Serial.print(" pc_connected=");
+  Serial.println(pc_connected);  
 
   switch (emotion) {
     case NEUTRAL:
@@ -116,33 +127,49 @@ void run_emotions(){
       else display_eyes(neutral, 125);
 
       if (face_detected) {
-        servo1_target = 90.0 + float(face.xCenter - 160) / 320.0 * -50.0;
-        servo2_target = 90.0 + float(face.yCenter - 120) / 240.0 * 50.0;
+        smoothX = smoothX * 0.6 + face.xCenter * 0.35;
+        smoothY = smoothY * 0.75 + face.yCenter * 0.3;
+
+        float offsetX = smoothX - 160;
+        float offsetY = smoothY - 120;
+
+        if (abs(offsetX) > 60) {
+          servo2_target = 90 + offsetX / 320.0 * -40.0;
+          servo2_target = constrain(servo2_target, 20, 180);
+        }
+        if (abs(offsetY) > 40) {
+          servo1_target = 20 + offsetY / 240.0 * 50.0;
+          servo1_target = constrain(servo1_target, 0, 90);
+        }
+       
+        Serial.print(" faceY=");   Serial.print(face.yCenter);
+        Serial.print(" | servo1_target="); Serial.print(servo1_target);
+        Serial.print(" servo2_target="); Serial.println(servo2_target);
       }
       break;
 
     case HAPPY:
       display_eyes(happy, 80);
-      servo1_target = 90 + 10.0 * sin(millis() / 500.0);
-      servo2_target = 80 + 15.0 * cos(millis() / 400.0);
+      servo1_target = 20 + 8.0 * sin(millis() / 500.0);   // tilt around 20
+      servo2_target = 90 + 15.0 * cos(millis() / 400.0);  // pan around 90
       break;
 
     case SAD:
       display_eyes(sad, 150);
-      servo1_target = 90 + 3.0 * sin(millis() / 400.0);
-      servo2_target = 120 + 20.0 * cos(millis() / 500.0);
+      servo1_target = 35 + 10.0 * cos(millis() / 500.0);  // look slightly down (sad)
+      servo2_target = 90 + 3.0 * sin(millis() / 400.0);
       break;
 
     case ANGRY:
       display_eyes(angry, 0);
-      servo1_target = 90 + 10.0 * sin(millis() / 250.0);
-      servo2_target = 110 + 15.0 * cos(millis() / 175.0);
+      servo1_target = 20 + 8.0 * sin(millis() / 250.0);   // quick shakes
+      servo2_target = 90 + 12.0 * cos(millis() / 175.0);
       break;
 
     case SUPRISED:
       display_eyes(suprised, 125);
-      servo1_target = 90;
-      servo2_target = 80 + 10.0 * cos(millis() / 500.0);
+      servo1_target = 10;   // jolt up (surprised looks up)
+      servo2_target = 90;
       break;
   }
 
@@ -189,11 +216,11 @@ void husky_lens() {
 
 // ---------------- SERVOS ----------------
 void move_servos(){
-  float t1 = pc_connected ? servo1_target_pc : servo1_target;
-  float t2 = pc_connected ? servo2_target_pc : servo2_target;
+  float t1 = (pc_connected && emotion != NEUTRAL) ? servo1_target_pc : servo1_target;
+  float t2 = (pc_connected && emotion != NEUTRAL) ? servo2_target_pc : servo2_target;
 
-  servo1_pos += constrain(t1 - servo1_pos, -1, 1);
-  servo2_pos += constrain(t2 - servo2_pos, -1, 1);
+  servo1_pos += constrain(t1 - servo1_pos, -2, 2);
+  servo2_pos += constrain(t2 - servo2_pos, -2, 2);
 
   servo1.write(servo1_pos);
   servo2.write(servo2_pos);
