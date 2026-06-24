@@ -26,14 +26,16 @@ enum Emotion {NEUTRAL, SUPRISED, HAPPY, ANGRY, SAD};
 Emotion emotion = NEUTRAL;
 
 Servo servo1, servo2;
-float servo1_pos = 90, servo2_pos = 90;
-float servo1_target = 90, servo2_target = 90;
+float servo1_pos = 20, servo2_pos = 90;
+float servo1_target = 20, servo2_target = 90;
 float servo1_speed = 0, servo2_speed = 0;
+float smoothX = 160, smoothY = 120;
 
-long timer1, timer2;
+long timer1, timer2, timer3;
 
 bool pc_connected = false;
-float servo1_target_pc = 90, servo2_target_pc = 90;
+float servo1_target_pc = 20, servo2_target_pc = 90;
+unsigned long lastFaceSeen = 0;
 
 // ---------------- EYE PATTERNS ----------------
 byte neutral[] = {B0000,B01110,B011110,B0111110,B011110,B01110,B0000};
@@ -66,13 +68,14 @@ void setup() {
 
   servo1.attach(SERVO_PIN_1);
   servo2.attach(SERVO_PIN_2);
-  servo1.write(90);
+  servo1.write(20);
   servo2.write(90);
+  
 }
 
 // ---------------- LOOP ----------------
 void loop() {
-  if (millis() - timer1 >= 20){
+  if (millis() - timer1 >= 40){
     timer1 = millis();
     move_servos();
     husky_lens();
@@ -83,6 +86,11 @@ void loop() {
   if (millis() - timer2 >= 10){
     timer2 = millis();
     communication();
+  }
+
+  if (millis() - timer3 >= 100) {
+  timer3 = millis();
+  Serial.println(face_detected ? "FACE:1" : "FACE:0");
   }
 }
 
@@ -106,43 +114,59 @@ void touch_sensor() {
 
 // ---------------- EMOTIONS ----------------
 void run_emotions(){
-  pixels.clear();  
+  pixels.clear();
 
   switch (emotion) {
     case NEUTRAL:
+
       if (millis() % 5000 < 150) display_eyes(blink1, 125);
       else if (millis() % 5000 < 300) display_eyes(blink2, 125);
       else if (millis() % 5000 < 450) display_eyes(blink1, 125);
       else display_eyes(neutral, 125);
 
       if (face_detected) {
-        servo1_target = 90.0 + float(face.xCenter - 160) / 320.0 * -50.0;
-        servo2_target = 90.0 + float(face.yCenter - 120) / 240.0 * 50.0;
+        smoothX += (face.xCenter - smoothX) * 0.3;
+        smoothY += (face.yCenter - smoothY) * 0.3;
+
+        float offsetX = smoothX - 160;
+        float offsetY = smoothY - 120;
+
+        if (abs(offsetX) < 30) offsetX = 0;
+        if (abs(offsetY) < 30) offsetY = 0;
+
+        // RELATIVE — nudge from current position, hold when centered
+        servo2_target += offsetX * -0.01;   // small gain (it accumulates each frame)
+        servo1_target += offsetY * 0.01;
+
+        servo2_target = constrain(servo2_target, 20, 160);
+        servo1_target = constrain(servo1_target, 0, 90);
+
       }
+
       break;
 
     case HAPPY:
       display_eyes(happy, 80);
-      servo1_target = 90 + 10.0 * sin(millis() / 500.0);
-      servo2_target = 80 + 15.0 * cos(millis() / 400.0);
+      servo1_target = 20 + 8.0 * sin(millis() / 500.0);
+      servo2_target = 90 + 15.0 * cos(millis() / 400.0);
       break;
 
     case SAD:
       display_eyes(sad, 150);
-      servo1_target = 90 + 3.0 * sin(millis() / 400.0);
-      servo2_target = 120 + 20.0 * cos(millis() / 500.0);
+      servo1_target = 35 + 10.0 * cos(millis() / 500.0);
+      servo2_target = 90 + 3.0 * sin(millis() / 400.0);
       break;
 
     case ANGRY:
       display_eyes(angry, 0);
-      servo1_target = 90 + 10.0 * sin(millis() / 250.0);
-      servo2_target = 110 + 15.0 * cos(millis() / 175.0);
+      servo1_target = 20 + 8.0 * sin(millis() / 250.0);
+      servo2_target = 90 + 12.0 * cos(millis() / 175.0);
       break;
 
     case SUPRISED:
       display_eyes(suprised, 125);
-      servo1_target = 90;
-      servo2_target = 80 + 10.0 * cos(millis() / 500.0);
+      servo1_target = 10;
+      servo2_target = 90;
       break;
   }
 
@@ -172,7 +196,10 @@ void display_eye(byte arr[], int hue, bool left) {
 void husky_lens() {
   if (!huskylens.request()) {}
   else if (!huskylens.available()) {
-    face_detected = false;
+
+    if (millis() - lastFaceSeen > 500) {
+        face_detected = false;
+    }
   } else {
     face_detected = false;
     int face_index = 0;
@@ -182,23 +209,24 @@ void husky_lens() {
         if (face_index == 0 || result.ID == 1) face = result;
         face_index++;
         face_detected = true;
+        lastFaceSeen = millis();
       }
     }
   }
 }
 
 // ---------------- SERVOS ----------------
-void move_servos(){
-  float t1 = pc_connected ? servo1_target_pc : servo1_target;
-  float t2 = pc_connected ? servo2_target_pc : servo2_target;
+void move_servos() {
 
-  servo1_pos += constrain(t1 - servo1_pos, -1, 1);
-  servo2_pos += constrain(t2 - servo2_pos, -1, 1);
+  float t1 = (pc_connected && emotion != NEUTRAL) ? servo1_target_pc : servo1_target;
+  float t2 = (pc_connected && emotion != NEUTRAL) ? servo2_target_pc : servo2_target;
 
-  servo1.write(servo1_pos);
-  servo2.write(servo2_pos);
+  servo1_pos += (t1 - servo1_pos) * 0.15;
+  servo2_pos += (t2 - servo2_pos) * 0.15;
+
+  servo1.write((int)servo1_pos);
+  servo2.write((int)servo2_pos);
 }
-
 // ---------------- COMM ----------------
 void communication() {
   char val = ' ';

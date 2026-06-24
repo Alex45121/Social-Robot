@@ -62,6 +62,20 @@ current_emotion = "Neutral"
 # CHANGED 2b: also store the fulfillment text so resposne() can use it.
 # main.py doesn't need to know about this — resposne() reads it as a global.
 current_fulfillment = ""
+
+def is_face_detected():
+    if not ser:
+        return False
+    latest = None
+    while ser.in_waiting:
+        line = ser.readline().decode(errors="ignore").strip()
+        if line in ("FACE:1", "FACE:0"):
+            latest = line
+    if latest == "FACE:1":
+        return True
+    elif latest == "FACE:0":
+        return False
+    return False  # no new data this cycle
  
 # Run this once to see all microphones
 """for index, name in enumerate(sr.Microphone.list_microphone_names()):
@@ -73,15 +87,15 @@ def resposne(emotion):
     # The fulfillment text is read from the module global current_fulfillment.
  
     # the Arduino still gets the same single-letter command as before
-    response = {
-        "Happy":    "H",
-        "Neutral":  "N",
-        "Angry":    "C",
-        "Scared":   "C",
-        "Sad":      "C",
-        "Question": "Q",
-        "Welcome":  "W",
-        "QUIT":     "X"
+    arduino_emotion = {
+    "Happy":    "HAPPY",
+    "Neutral":  "NEUTRAL",
+    "Angry":    "ANGRY",
+    "Scared":   "SUPRISED",   # arduino has no "scared" → use SUPRISED
+    "Sad":      "SAD",
+    "Question": "NEUTRAL",    # arduino has no "question" → fallback
+    "Welcome":  "HAPPY",      # arduino has no "welcome" → use HAPPY
+    "QUIT":     "NEUTRAL"
     }
  
     # CHANGED 3: instead of loading a pre-recorded mp3, generate beeps
@@ -92,10 +106,11 @@ def resposne(emotion):
     else:
         print("⚠️ No fulfillment text to speak")
  
-    connection = response.get(emotion, "N")
+    emo = arduino_emotion.get(emotion, "NEUTRAL")
     if ser:
-        ser.write((connection + "\n").encode())
- 
+        message = f"90,20,{emo},\n"
+        ser.write(message.encode())
+        print(f"📡 Sent to Arduino: {message.strip()}")
  
 # --- Text input function ---
 def detect_intent_texts(project_id, session_id, texts, language_code):
@@ -154,8 +169,7 @@ def detect_intent_voice(project_id, session_id, language_code):
         return None
  
  
-# --- RUN ---
-print("Robot is ready! Start Speaking")
+
  
 if __name__ == "__main__":
     print("Robot is ready! Start Speaking")

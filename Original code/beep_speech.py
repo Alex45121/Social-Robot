@@ -29,35 +29,109 @@ SAMPLE_RATE = 22050
 # than "Angry". The mapping from user-emotion -> robot-emotion is done in
 # main.py; this file just produces whatever emotion you ask for.
 EMOTION_PROFILES = {
-    "neutral":    dict(base_pitch=320, pitch_range=120, tempo=0.16, waveform="square"),
-    "happy":      dict(base_pitch=440, pitch_range=260, tempo=0.12, waveform="square"),
-    "sad":        dict(base_pitch=220, pitch_range=70,  tempo=0.24, waveform="sine"),
-    "angry":      dict(base_pitch=300, pitch_range=200, tempo=0.10, waveform="saw"),
-    "scared":     dict(base_pitch=480, pitch_range=180, tempo=0.09, waveform="saw"),
-    "question":   dict(base_pitch=340, pitch_range=160, tempo=0.15, waveform="square"),
-    "welcome":    dict(base_pitch=400, pitch_range=220, tempo=0.13, waveform="square"),
-    "comforting": dict(base_pitch=250, pitch_range=90,  tempo=0.22, waveform="sine"),
+    "neutral": dict(
+        base_pitch=320,
+        pitch_range=120,
+        tempo=0.16,
+        waveform="square"
+    ),
+
+    "happy": dict(
+        base_pitch=520,
+        pitch_range=420,
+        tempo=0.09,
+        waveform="square"
+    ),
+
+    "sad": dict(
+        base_pitch=180,
+        pitch_range=60,
+        tempo=0.28,
+        waveform="sine"
+    ),
+
+    "angry": dict(
+        base_pitch=280,
+        pitch_range=260,
+        tempo=0.08,
+        waveform="saw"
+    ),
+
+    "scared": dict(
+        base_pitch=650,
+        pitch_range=380,
+        tempo=0.07,
+        waveform="saw"
+    ),
+
+    "question": dict(
+        base_pitch=340,
+        pitch_range=260,
+        tempo=0.13,
+        waveform="square"
+    ),
+
+    "welcome": dict(
+        base_pitch=480,
+        pitch_range=320,
+        tempo=0.11,
+        waveform="square"
+    ),
+
+    "comforting": dict(
+        base_pitch=220,
+        pitch_range=80,
+        tempo=0.24,
+        waveform="sine"
+    ),
 }
  
  
-def _osc(freq, duration, waveform):
-    """Generate one beep of a given frequency, duration and timbre."""
+def _osc(freq, duration, waveform,
+         end_freq=None,
+         vibrato_rate=0,
+         vibrato_depth=0):
+
     n = int(SAMPLE_RATE * duration)
     t = np.linspace(0, duration, n, endpoint=False)
-    phase = 2 * np.pi * freq * t
+
+    if end_freq is None:
+        end_freq = freq
+
+    # Frequency sweep
+    freqs = np.linspace(freq, end_freq, n)
+
+    # Vibrato
+    if vibrato_rate > 0 and vibrato_depth > 0:
+        freqs *= (
+            1
+            + vibrato_depth
+            * np.sin(2 * np.pi * vibrato_rate * t)
+        )
+
+    phase = np.cumsum(2 * np.pi * freqs / SAMPLE_RATE)
+
     if waveform == "sine":
         wave = np.sin(phase)
+
     elif waveform == "square":
         wave = np.sign(np.sin(phase))
+
     elif waveform == "saw":
-        wave = 2 * (t * freq - np.floor(0.5 + t * freq))
+        wave = 2 * ((phase / (2 * np.pi)) % 1) - 1
+
     else:
         wave = np.sin(phase)
-    # short attack/decay envelope so beeps don't click
+
+    # smoother attack/release
     env = np.ones(n)
-    edge = max(1, int(0.01 * SAMPLE_RATE))
-    env[:edge] = np.linspace(0, 1, edge)
-    env[-edge:] = np.linspace(1, 0, edge)
+
+    attack = max(1, int(0.02 * SAMPLE_RATE))
+    release = max(1, int(0.03 * SAMPLE_RATE))
+
+    env[:attack] = np.linspace(0, 1, attack)
+    env[-release:] = np.linspace(1, 0, release)
+
     return wave * env * 0.6
  
  
@@ -98,10 +172,61 @@ def text_to_beeps(text, emotion="neutral"):
  
         freq = profile["base_pitch"] + contour * profile["pitch_range"]
         freq = max(120, freq)
- 
-        dur = profile["tempo"] * (0.7 + 0.5 * min(len(tok) / 6, 1.5))
- 
-        audio.append(_osc(freq, dur, profile["waveform"]))
+
+        dur = profile["tempo"] * (
+            0.7 + 0.5 * min(len(tok) / 6, 1.5)
+        )
+
+        emotion_name = emotion.lower()
+
+        end_freq = freq
+        vibrato_rate = 0
+        vibrato_depth = 0
+
+        # HAPPY
+        if emotion_name == "happy":
+            end_freq = freq * 1.45
+
+        # QUESTION
+        elif emotion_name == "question":
+            end_freq = freq * 1.6
+
+        # SCARED
+        elif emotion_name == "scared":
+            end_freq = freq * 1.25
+            vibrato_rate = 14
+            vibrato_depth = 0.10
+
+        # SAD
+        elif emotion_name == "sad":
+            end_freq = freq * 0.75
+
+        # COMFORTING
+        elif emotion_name == "comforting":
+            end_freq = freq * 0.90
+
+        # WELCOME
+        elif emotion_name == "welcome":
+            end_freq = freq * 1.30
+
+        # ANGRY
+        elif emotion_name == "angry":
+            end_freq = freq * 0.85
+
+        # Last word boost for questions
+        if is_question and word_index == n - 1:
+            end_freq *= 1.4
+
+        audio.append(
+            _osc(
+                freq,
+                dur,
+                profile["waveform"],
+                end_freq=end_freq,
+                vibrato_rate=vibrato_rate,
+                vibrato_depth=vibrato_depth
+            )
+        )
         audio.append(_silence(profile["tempo"] * 0.35))
         word_index += 1
  
