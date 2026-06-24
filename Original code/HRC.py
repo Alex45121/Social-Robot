@@ -83,34 +83,33 @@ def is_face_detected():
  
  
 def resposne(emotion):
-    # NOTE: signature is unchanged — main.py still calls resposne(HRC.current_emotion).
-    # The fulfillment text is read from the module global current_fulfillment.
- 
-    # the Arduino still gets the same single-letter command as before
-    arduino_emotion = {
-    "Happy":    "HAPPY",
-    "Neutral":  "NEUTRAL",
-    "Angry":    "ANGRY",
-    "Scared":   "SUPRISED",   # arduino has no "scared" → use SUPRISED
-    "Sad":      "SAD",
-    "Question": "NEUTRAL",    # arduino has no "question" → fallback
-    "Welcome":  "HAPPY",      # arduino has no "welcome" → use HAPPY
-    "QUIT":     "NEUTRAL"
+    # Map your emotion labels → teammates' Arduino letters
+    arduino_letter = {
+        "Happy":    "H",   # Happy
+        "Neutral":  "N",   # Neutral
+        "Angry":    "F",   # angry user → robot Frawn
+        "Scared":   "C",   # scared user → robot Comforts
+        "Sad":      "C",   # sad user → robot Comforts
+        "Question": "Q",   # Questioning
+        "Welcome":  "H",   # welcome → Happy
+        "QUIT":     "N"    # quit → Neutral
     }
- 
-    # CHANGED 3: instead of loading a pre-recorded mp3, generate beeps
-    # from the fulfillment text using the comforting/robot emotion.
+
+    letter = arduino_letter.get(emotion, "N")
+    if ser:
+        message = f"{letter}\n"
+        ser.write(message.encode())
+        print(f"📡 Sent to Arduino: {letter}")
+
+    # Generate beep speech (unchanged)
     robot_emotion = ROBOT_RESPONSE_EMOTION.get(emotion, "neutral")
     if current_fulfillment and current_fulfillment.strip():
         speak_beeps(current_fulfillment, robot_emotion, out_path="robot_reply.wav")
     else:
         print("⚠️ No fulfillment text to speak")
- 
-    emo = arduino_emotion.get(emotion, "NEUTRAL")
-    if ser:
-        message = f"90,20,{emo},\n"
-        ser.write(message.encode())
-        print(f"📡 Sent to Arduino: {message.strip()}")
+
+    # Send just the LETTER to Arduino
+    
  
 # --- Text input function ---
 def detect_intent_texts(project_id, session_id, texts, language_code):
@@ -139,11 +138,9 @@ def detect_intent_texts(project_id, session_id, texts, language_code):
  
 # --- Voice input function ---
 def detect_intent_voice(project_id, session_id, language_code):
-    global current_fulfillment
-    # clear last turn's text: if this listen fails, resposne() will see ""
-    # and skip instead of replaying the previous sentence.
+    global current_fulfillment, current_emotion   # ← add current_emotion here
     current_fulfillment = ""
- 
+
     recognizer = sr.Recognizer()
     with sr.Microphone(device_index=1) as source:
         print("🔧 Adjusting for background noise... please wait")
@@ -154,8 +151,9 @@ def detect_intent_voice(project_id, session_id, language_code):
             print("Processing your speech...")
         except sr.WaitTimeoutError:
             print("❌ No speech detected. Try again.")
+            current_emotion = "Neutral"        # ← reset on timeout
             return None
- 
+
     try:
         spoken_text = recognizer.recognize_google(audio)
         print(f"✅ You said: {spoken_text}")
@@ -163,9 +161,11 @@ def detect_intent_voice(project_id, session_id, language_code):
         return spoken_text
     except sr.UnknownValueError:
         print("❌ Could not understand. Please speak louder and more clearly.")
+        current_emotion = "Neutral"            # ← reset when not understood
         return None
     except sr.RequestError as e:
         print(f"❌ Google API error: {e}")
+        current_emotion = "Neutral"            # ← reset on API error
         return None
  
  

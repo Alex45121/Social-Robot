@@ -1,205 +1,345 @@
+// ============================================================================
+//  GroveBot - Merged Robot Brain
+//  Combines: two-matrix eyes + ear servos + DC motors + head face-tracking
+//  Commands (single letter over serial):
+//    N=Neutral  Q=Questioning  C=Comfort  H=Happy  S=Sad  F=Frown  B=Breathe
+//  Sends "FACE:1"/"FACE:0" to the PC every 100ms.
+// ============================================================================
+
 #include <Adafruit_NeoPixel.h>
-#include <SoftwareSerial.h>
-#include "KT403A_Player.h"
 #include "HUSKYLENS.h"
-#include <Servo.h> 
+#include <Servo.h>
+#include <Wire.h>
 
-#define LED_PIN       4
-#define NUMPIXELS    74
-#define TOUCH_PIN     A0
-#define SERVO_PIN_1   6
-#define SERVO_PIN_2   7
+// ---------------- PIN SETUP ----------------
+#define LEFT_LED_PIN    4      // left eye matrix
+#define RIGHT_LED_PIN   5      // right eye matrix
+#define PIXELS_PER_EYE  37
 
-SoftwareSerial mp3(2, 3);   // MP3 module
-KT403A<SoftwareSerial> Mp3Player;
+#define SERVO_PIN_1     6      // head pan  (external power, Arduino signal)
+#define SERVO_PIN_2     7      // head tilt
+#define LEFT_EAR_PIN    9      // ear servo 1
+#define RIGHT_EAR_PIN   3     // ear servo 2
 
-Adafruit_NeoPixel pixels(NUMPIXELS, LED_PIN);
+#define TOUCH_PIN       A0
+#define DC_MOTOR_PIN    A1     // all 3 vibration motors together (via driver, external battery)
 
-int LED_BRIGHTNESS = 8;
+// ---------------- EYE HARDWARE / TUNING ----------------
+#define LEFT_ROTATION_STEPS  -2
+#define RIGHT_ROTATION_STEPS  0
+#define LEFT_COMFORT_ROTATION_STEPS  0
+#define RIGHT_COMFORT_ROTATION_STEPS 0
+#define LEFT_HAPPY_ROTATION_STEPS    0
+#define RIGHT_HAPPY_ROTATION_STEPS   0
+#define HAPPY_TILT_DIRECTION        -1
+#define HAPPY_TILT_AMOUNT            0.75
+#define LEFT_SAD_ROTATION_STEPS      0
+#define RIGHT_SAD_ROTATION_STEPS     0
+#define LEFT_FROWN_ROTATION_STEPS   -2
+#define RIGHT_FROWN_ROTATION_STEPS   0
+#define RIGHT_FROWN_TILT_DIRECTION  -1
+#define RIGHT_FROWN_TILT_AMOUNT      1.50
+#define LEFT_BLINK_ROTATION_STEPS    0
+#define RIGHT_BLINK_ROTATION_STEPS   0
+#define LEFT_BREATHE_ROTATION_STEPS -2
+#define RIGHT_BREATHE_ROTATION_STEPS 0
+#define RIGHT_REVERSED  true
+#define BLINK45_DIRECTION 1
+#define COMFORT_SECOND_HUE 223
+#define COMFORT_SECOND_BRIGHTNESS 1
+#define BREATHING_CYCLE_MS 8000
+#define BREATHING_MIN_BRIGHTNESS 2
+#define BREATHING_MAX_BRIGHTNESS 18
+
+// ---------------- EAR ANGLES PER EMOTION ----------------
+const int LEFT_NEUTRAL  = 90,  RIGHT_NEUTRAL  = 90;
+const int LEFT_QUESTION = 60,  RIGHT_QUESTION = 120;
+const int LEFT_COMFORT  = 100, RIGHT_COMFORT  = 80;
+const int LEFT_HAPPY    = 135, RIGHT_HAPPY    = 45;
+const int LEFT_SAD      = 45,  RIGHT_SAD      = 135;
+const int LEFT_FROWN    = 30,  RIGHT_FROWN    = 150;
+const int LEFT_BREATHE_IN  = 150, RIGHT_BREATHE_IN  = 30;
+const int LEFT_BREATHE_OUT = 90,  RIGHT_BREATHE_OUT = 90;
+unsigned long emotionStartTime = 0;
+const unsigned long EMOTION_DURATION = 5000;
+
+// ---------------- OBJECTS ----------------
+Adafruit_NeoPixel leftEye(PIXELS_PER_EYE, LEFT_LED_PIN);
+Adafruit_NeoPixel rightEye(PIXELS_PER_EYE, RIGHT_LED_PIN);
 
 HUSKYLENS huskylens;
 HUSKYLENSResult face;
+
+Servo servo1, servo2;       // head pan/tilt
+Servo leftEar, rightEar;    // ears
+
+// ---------------- STATE ----------------
+enum Emotion { NEUTRAL, QUESTIONING, COMFORT, HAPPY, SAD, FROWN, BREATHE };
+Emotion emotion = NEUTRAL;
+Emotion lastEarEmotion = NEUTRAL;   // so ears only move when emotion changes
+
 bool face_detected = false;
 bool prev_touch_value = 0;
-
-enum Emotion {NEUTRAL, SUPRISED, HAPPY, ANGRY, SAD};
-Emotion emotion = NEUTRAL;
-
-Servo servo1, servo2;
-float servo1_pos = 20, servo2_pos = 90;
-float servo1_target = 20, servo2_target = 90;
-float servo1_speed = 0, servo2_speed = 0;
-float smoothX = 160, smoothY = 120;
-
-long timer1, timer2, timer3;
-
-bool pc_connected = false;
-float servo1_target_pc = 20, servo2_target_pc = 90;
 unsigned long lastFaceSeen = 0;
 
+float servo1_pos = 20, servo2_pos = 90;
+float servo1_target = 20, servo2_target = 90;
+float smoothX = 160, smoothY = 120;
+
+int LED_BRIGHTNESS = 8;
+unsigned long last_blink_trigger = 0;
+int blink_interval = 4500;
+unsigned long breathing_start_time = 0;
+bool do_blink = false;
+unsigned long blink_timer = 0;
+
+long timer1, timer2, timer3, timer4;
+
+// ---------------- HEX COORDINATE TYPE ----------------
+typedef struct { int q; int r; } HexCoord;
+int rows[] = { 4, 5, 6, 7, 6, 5, 4 };
+
 // ---------------- EYE PATTERNS ----------------
-byte neutral[] = {B0000,B01110,B011110,B0111110,B011110,B01110,B0000};
-byte blink1[] = {B0000,B00000,B011110,B0111110,B011110,B00000,B0000};
-byte blink2[] = {B0000,B00000,B000000,B1111111,B000000,B00000,B0000};
-byte suprised[] = {B1111,B11111,B111111,B1111111,B111111,B11111,B1111};
-byte happy[] = {B1111,B11111,B111111,B1100011,B000000,B00000,B0000};
-byte angry[] = {B0000,B10000,B110000,B1111000,B111110,B11111,B1111};
-byte sad[] = {B0000,B00001,B000011,B0001111,B011111,B11111,B1111};
+byte neutral[]     = { B0000, B01110, B011110, B0111110, B011110, B01110, B0000 };
+byte questioning[] = { B1111, B11111, B111111, B1111111, B111111, B11111, B1111 };
+byte comfort[]     = { B0000, B00000, B100001, B1100011, B111111, B11111, B1111 };
+byte happy_smile[] = { B0000, B00000, B000011, B1000011, B011111, B01110, B0010 };
+byte sad[]         = { B0000, B00001, B000011, B0001111, B011111, B11111, B1111 };
+byte frown[]       = { B0000, B00000, B100000, B1110000, B111000, B11111, B1111 };
 
-// ---------------- SETUP ----------------
+// ============================================================================
+//  SETUP
+// ============================================================================
 void setup() {
-  pinMode(TOUCH_PIN, INPUT);
-
-  pixels.begin();
   Serial.begin(115200);
 
-  // ✅ FIXED MP3 PART
-  mp3.begin(9600);
-  delay(1000);
-  Mp3Player.init(mp3);
-  Mp3Player.volume(30);
+  // Eyes
+  leftEye.begin();  rightEye.begin();
+  leftEye.clear();  rightEye.clear();
+  leftEye.show();   rightEye.show();
+  breathing_start_time = millis();
 
-  // HuskyLens
+  // Head servos
+  servo1.attach(SERVO_PIN_1);
+  servo2.attach(SERVO_PIN_2);
+  servo1.write(20);
+  servo2.write(90);
+
+  // Ears
+  leftEar.attach(LEFT_EAR_PIN);
+  rightEar.attach(RIGHT_EAR_PIN);
+  leftEar.write(LEFT_NEUTRAL);
+  rightEar.write(RIGHT_NEUTRAL);
+
+  // DC motors
+  pinMode(DC_MOTOR_PIN, OUTPUT);
+  digitalWrite(DC_MOTOR_PIN, LOW);
+
+  // Touch
+  pinMode(TOUCH_PIN, INPUT);
+
+  // Camera
   Wire.begin();
   while (!huskylens.begin(Wire)) {
     Serial.println(F("HuskyLens failed!"));
     delay(100);
   }
 
-  servo1.attach(SERVO_PIN_1);
-  servo2.attach(SERVO_PIN_2);
-  servo1.write(20);
-  servo2.write(90);
-  
+  Serial.println("GroveBot ready");
 }
 
-// ---------------- LOOP ----------------
+// ============================================================================
+//  MAIN LOOP
+// ============================================================================
 void loop() {
-  if (millis() - timer1 >= 40){
+  // Head + tracking + ears (every 40ms)
+  if (emotion != NEUTRAL && millis() - emotionStartTime > EMOTION_DURATION) {
+    emotion = NEUTRAL;
+  }
+  if (millis() - timer1 >= 40) {
     timer1 = millis();
-    move_servos();
     husky_lens();
     touch_sensor();
-    run_emotions();
+    update_head();
+    move_servos();
+    update_ears();
+    update_motors();
   }
 
-  if (millis() - timer2 >= 10){
+  // Eyes (every 30ms - smooth enough for blink/breathing, leaves CPU for camera)
+  if (millis() - timer4 >= 30) {
+    timer4 = millis();
+    run_eyes();
+  }
+
+  // Serial in (every 10ms)
+  if (millis() - timer2 >= 10) {
     timer2 = millis();
     communication();
   }
 
+  // Face status out to PC (every 100ms)
   if (millis() - timer3 >= 100) {
-  timer3 = millis();
-  Serial.println(face_detected ? "FACE:1" : "FACE:0");
+    timer3 = millis();
+    Serial.println(face_detected ? "FACE:1" : "FACE:0");
   }
 }
 
-// ---------------- TOUCH ----------------
+// ============================================================================
+//  SERIAL COMMUNICATION  (single letter)
+// ============================================================================
+void communication() {
+  if (Serial.available()) {
+    char input = Serial.read();
+    input = toupper(input);
+
+    switch (input) {
+      case 'N': emotion = NEUTRAL;emotionStartTime = millis(); break;    
+      case 'Q': emotion = QUESTIONING; emotionStartTime = millis(); break;
+      case 'C': emotion = COMFORT;     emotionStartTime = millis(); break;
+      case 'H': emotion = HAPPY;       emotionStartTime = millis(); break;
+      case 'S': emotion = SAD;         emotionStartTime = millis(); break;
+      case 'F': emotion = FROWN;       emotionStartTime = millis(); break;
+      case 'B':
+        emotion = BREATHE;
+        breathing_start_time = millis();
+        break;
+      // ignore whitespace / unknown
+      default: break;
+    }
+  }
+}
+
+// ============================================================================
+//  TOUCH  (cycles through emotions for manual testing)
+// ============================================================================
 void touch_sensor() {
   bool touch_value = digitalRead(TOUCH_PIN);
-
   if (touch_value && !prev_touch_value) {
-    Mp3Player.next();   // ✅ FIXED
-
     switch (emotion) {
-      case NEUTRAL: emotion = SUPRISED; break;
-      case SUPRISED: emotion = HAPPY; break;
-      case HAPPY: emotion = ANGRY; break;
-      case ANGRY: emotion = SAD; break;
-      case SAD: emotion = NEUTRAL; break;
+      case NEUTRAL:     emotion = QUESTIONING; break;
+      case QUESTIONING: emotion = COMFORT;     break;
+      case COMFORT:     emotion = HAPPY;       break;
+      case HAPPY:       emotion = SAD;         break;
+      case SAD:         emotion = FROWN;       break;
+      case FROWN:       emotion = BREATHE;     breathing_start_time = millis(); break;
+      case BREATHE:     emotion = NEUTRAL;     break;
     }
   }
   prev_touch_value = touch_value;
 }
 
-// ---------------- EMOTIONS ----------------
-void run_emotions(){
-  pixels.clear();
+// ============================================================================
+//  HEAD  (face tracking in NEUTRAL, gesture in emotions)
+// ============================================================================
+void update_head() {
+  if (emotion == NEUTRAL) {
+    // --- Face tracking (relative nudge, holds when centered) ---
+    if (face_detected) {
+      smoothX += (face.xCenter - smoothX) * 0.3;
+      smoothY += (face.yCenter - smoothY) * 0.3;
 
-  switch (emotion) {
-    case NEUTRAL:
+      float offsetX = smoothX - 160;
+      float offsetY = smoothY - 120;
 
-      if (millis() % 5000 < 150) display_eyes(blink1, 125);
-      else if (millis() % 5000 < 300) display_eyes(blink2, 125);
-      else if (millis() % 5000 < 450) display_eyes(blink1, 125);
-      else display_eyes(neutral, 125);
+      if (abs(offsetX) < 30) offsetX = 0;
+      if (abs(offsetY) < 30) offsetY = 0;
 
-      if (face_detected) {
-        smoothX += (face.xCenter - smoothX) * 0.3;
-        smoothY += (face.yCenter - smoothY) * 0.3;
+      servo2_target += offsetX * -0.01;
+      servo1_target += offsetY *  0.01;
 
-        float offsetX = smoothX - 160;
-        float offsetY = smoothY - 120;
-
-        if (abs(offsetX) < 30) offsetX = 0;
-        if (abs(offsetY) < 30) offsetY = 0;
-
-        // RELATIVE — nudge from current position, hold when centered
-        servo2_target += offsetX * -0.01;   // small gain (it accumulates each frame)
-        servo1_target += offsetY * 0.01;
-
-        servo2_target = constrain(servo2_target, 20, 160);
-        servo1_target = constrain(servo1_target, 0, 90);
-
-      }
-
-      break;
-
-    case HAPPY:
-      display_eyes(happy, 80);
-      servo1_target = 20 + 8.0 * sin(millis() / 500.0);
-      servo2_target = 90 + 15.0 * cos(millis() / 400.0);
-      break;
-
-    case SAD:
-      display_eyes(sad, 150);
-      servo1_target = 35 + 10.0 * cos(millis() / 500.0);
-      servo2_target = 90 + 3.0 * sin(millis() / 400.0);
-      break;
-
-    case ANGRY:
-      display_eyes(angry, 0);
-      servo1_target = 20 + 8.0 * sin(millis() / 250.0);
-      servo2_target = 90 + 12.0 * cos(millis() / 175.0);
-      break;
-
-    case SUPRISED:
-      display_eyes(suprised, 125);
-      servo1_target = 10;
-      servo2_target = 90;
-      break;
-  }
-
-  pixels.show();
-}
-
-// ---------------- EYES ----------------
-void display_eyes(byte arr[], int hue){
-   display_eye(arr, hue, true);
-   display_eye(arr, hue, false);
-}
-
-void display_eye(byte arr[], int hue, bool left) {
-  int rows[] = {4,5,6,7,6,5,4};
-  int index = (left) ? 0 : 37;
-
-  for (int i = 0; i < 7; i++) {
-    for (int j = 0; j < rows[i]; j++) {
-      int brightness = LED_BRIGHTNESS * bitRead(arr[i], (left) ? rows[i]-1-j : j);
-      pixels.setPixelColor(index, pixels.ColorHSV(hue * 256, 255, brightness));
-      index++;
+      servo2_target = constrain(servo2_target, 20, 160);
+      servo1_target = constrain(servo1_target, 0, 90);
+    }
+  } else {
+    // --- Emotion head gestures ---
+    switch (emotion) {
+      case HAPPY:
+        servo1_target = 20 + 8.0 * sin(millis() / 500.0);
+        servo2_target = 90 + 15.0 * cos(millis() / 400.0);
+        break;
+      case SAD:
+        servo1_target = 35 + 10.0 * cos(millis() / 500.0);
+        servo2_target = 90 + 3.0 * sin(millis() / 400.0);
+        break;
+      case COMFORT:
+        servo1_target = 25 + 4.0 * sin(millis() / 700.0);
+        servo2_target = 90 + 5.0 * cos(millis() / 700.0);
+        break;
+      case QUESTIONING:
+        servo1_target = 15;                 // slight look up
+        servo2_target = 90 + 12.0 * sin(millis() / 600.0); // tilt side to side
+        break;
+      case FROWN:
+        servo1_target = 40;                 // look down
+        servo2_target = 90;
+        break;
+      case BREATHE:
+        servo1_target = 20;                 // steady, calm
+        servo2_target = 90;
+        break;
+      default:
+        break;
     }
   }
 }
 
-// ---------------- HUSKY ----------------
+// ---------------- SERVO MOVEMENT (always local target = animations play) ----
+void move_servos() {
+  servo1_pos += (servo1_target - servo1_pos) * 0.15;
+  servo2_pos += (servo2_target - servo2_pos) * 0.15;
+  servo1.write((int)servo1_pos);
+  servo2.write((int)servo2_pos);
+}
+
+// ============================================================================
+//  EARS  (move once when emotion changes; BREATHE handled separately)
+// ============================================================================
+void update_ears() {
+  if (emotion == lastEarEmotion) return;   // only move on change
+  lastEarEmotion = emotion;
+
+  switch (emotion) {
+    case NEUTRAL:     moveBothEars(LEFT_NEUTRAL,  RIGHT_NEUTRAL);  break;
+    case QUESTIONING: moveBothEars(LEFT_QUESTION, RIGHT_QUESTION); break;
+    case COMFORT:     moveBothEars(LEFT_COMFORT,  RIGHT_COMFORT);  break;
+    case HAPPY:       moveBothEars(LEFT_HAPPY,    RIGHT_HAPPY);    break;
+    case SAD:         moveBothEars(LEFT_SAD,      RIGHT_SAD);      break;
+    case FROWN:       moveBothEars(LEFT_FROWN,    RIGHT_FROWN);    break;
+    case BREATHE:     moveBothEars(LEFT_BREATHE_IN, RIGHT_BREATHE_IN); break;
+  }
+}
+
+void moveBothEars(int leftTarget, int rightTarget) {
+  int l = leftEar.read();
+  int r = rightEar.read();
+  int ls = (leftTarget  > l) ? 1 : -1;
+  int rs = (rightTarget > r) ? 1 : -1;
+  while (l != leftTarget || r != rightTarget) {
+    if (l != leftTarget) { l += ls; leftEar.write(l); }
+    if (r != rightTarget){ r += rs; rightEar.write(r); }
+    delay(10);
+  }
+}
+
+// ============================================================================
+//  DC MOTORS  (purr on for COMFORT and HAPPY, off otherwise)
+// ============================================================================
+void update_motors() {
+  if (emotion == COMFORT || emotion == HAPPY) {
+    digitalWrite(DC_MOTOR_PIN, HIGH);
+  } else {
+    digitalWrite(DC_MOTOR_PIN, LOW);
+  }
+}
+
+// ============================================================================
+//  HUSKYLENS
+// ============================================================================
 void husky_lens() {
   if (!huskylens.request()) {}
   else if (!huskylens.available()) {
-
-    if (millis() - lastFaceSeen > 500) {
-        face_detected = false;
-    }
+    if (millis() - lastFaceSeen > 500) face_detected = false;
   } else {
     face_detected = false;
     int face_index = 0;
@@ -215,52 +355,200 @@ void husky_lens() {
   }
 }
 
-// ---------------- SERVOS ----------------
-void move_servos() {
+// ============================================================================
+//  EYES  (full advanced version: blink, breathing, tilt, frown)
+// ============================================================================
+void run_eyes() {
+  leftEye.clear();
+  rightEye.clear();
 
-  float t1 = (pc_connected && emotion != NEUTRAL) ? servo1_target_pc : servo1_target;
-  float t2 = (pc_connected && emotion != NEUTRAL) ? servo2_target_pc : servo2_target;
+  if (emotion != BREATHE && !do_blink &&
+      millis() - last_blink_trigger > blink_interval) {
+    do_blink = true;
+    blink_timer = millis();
+    last_blink_trigger = millis();
+    blink_interval = random(3500, 7000);
+  }
 
-  servo1_pos += (t1 - servo1_pos) * 0.15;
-  servo2_pos += (t2 - servo2_pos) * 0.15;
+  int hue = getEmotionHue(emotion);
 
-  servo1.write((int)servo1_pos);
-  servo2.write((int)servo2_pos);
+  if (emotion == BREATHE && !do_blink) LED_BRIGHTNESS = getBreathingBrightness();
+  else LED_BRIGHTNESS = 8;
+
+  if (do_blink) {
+    unsigned long elapsed = millis() - blink_timer;
+    if (elapsed < 100)      display_blink45(hue, 1);
+    else if (elapsed < 220) display_blink45(hue, 2);
+    else if (elapsed < 340) display_blink45(hue, 1);
+    else do_blink = false;
+    leftEye.show(); rightEye.show();
+    return;
+  }
+
+  switch (emotion) {
+    case NEUTRAL:     display_eyes(neutral, hue, LEFT_ROTATION_STEPS, RIGHT_ROTATION_STEPS); break;
+    case QUESTIONING: display_eyes(questioning, hue, LEFT_ROTATION_STEPS, RIGHT_ROTATION_STEPS); break;
+    case COMFORT:     display_comfort_eyes(comfort, hue, LEFT_COMFORT_ROTATION_STEPS, RIGHT_COMFORT_ROTATION_STEPS); break;
+    case HAPPY:       display_tilted_eyes(happy_smile, hue, LEFT_HAPPY_ROTATION_STEPS, RIGHT_HAPPY_ROTATION_STEPS, HAPPY_TILT_DIRECTION, HAPPY_TILT_AMOUNT); break;
+    case SAD:         display_eyes(sad, hue, LEFT_SAD_ROTATION_STEPS, RIGHT_SAD_ROTATION_STEPS); break;
+    case FROWN:       display_frown_eyes(hue); break;
+    case BREATHE:     display_breathing_eyes(hue, LEFT_BREATHE_ROTATION_STEPS, RIGHT_BREATHE_ROTATION_STEPS); break;
+  }
+
+  leftEye.show();
+  rightEye.show();
 }
-// ---------------- COMM ----------------
-void communication() {
-  char val = ' ';
-  String data = "";
-  if (Serial.available()) {
-    do {
-      val = Serial.read();
-      if (val != -1) data = data + val;
-    }
-    while ( val != -1);
+
+int getEmotionHue(int e) {
+  switch (e) {
+    case NEUTRAL:     return 110;
+    case QUESTIONING: return 45;
+    case COMFORT:     return 95;
+    case HAPPY:       return 35;
+    case SAD:         return 160;
+    case FROWN:       return 15;
+    case BREATHE:     return 145;
   }
+  return 110;
+}
 
-  // data is a string of what we received, we will split it into the different values
-  // We receive multiple values from our PC as in "123,abc,123,"
-  // We can then split this string and extract the values out.
-  if (data.length() > 1 && data.charAt(data.length() - 1) == ',') {
-    Serial.print(data);
-    pc_connected = true; // Once we get a message from the PC, we turn off the touch sensor and do everything with input from the PC
+float getBreathingWave() {
+  unsigned long cycle = (millis() - breathing_start_time) % BREATHING_CYCLE_MS;
+  float phase = cycle / (float)BREATHING_CYCLE_MS;
+  return (sin(phase * TWO_PI - HALF_PI) + 1.0) / 2.0;
+}
 
-    String value;
-    for (int i = 0; data.length() > 0; i++){
-      value = data.substring(0, data.indexOf(','));
-      data = data.substring(data.indexOf(',') + 1, data.length());
+int getBreathingBrightness() {
+  return BREATHING_MIN_BRIGHTNESS + getBreathingWave() * (BREATHING_MAX_BRIGHTNESS - BREATHING_MIN_BRIGHTNESS);
+}
 
-      if (i == 0) servo1_target_pc = value.toInt();
-      if (i == 1) servo2_target_pc = value.toInt();
-      if (i == 2) {
-        if (value == "NEUTRAL") emotion = NEUTRAL;
-        if (value == "SUPRISED") emotion = SUPRISED;
-        if (value == "HAPPY") emotion = HAPPY;
-        if (value == "ANGRY") emotion = ANGRY;
-        if (value == "SAD") emotion = SAD;
+// ---------- hex helpers ----------
+HexCoord indexToCoord(int index) {
+  int counter = 0;
+  for (int row = 0; row < 7; row++) {
+    int r = row - 3;
+    int qStart = max(-3, -r - 3);
+    for (int col = 0; col < rows[row]; col++) {
+      if (counter == index) { HexCoord c = { qStart + col, r }; return c; }
+      counter++;
+    }
+  }
+  HexCoord f = { 0, 0 }; return f;
+}
+int coordToIndex(HexCoord c) {
+  int counter = 0;
+  for (int row = 0; row < 7; row++) {
+    int r = row - 3;
+    int qStart = max(-3, -r - 3);
+    for (int col = 0; col < rows[row]; col++) {
+      int q = qStart + col;
+      if (q == c.q && r == c.r) return counter;
+      counter++;
+    }
+  }
+  return 0;
+}
+HexCoord rotateHex120(HexCoord c){ HexCoord o={-c.q-c.r,c.q}; return o; }
+HexCoord rotateHex240(HexCoord c){ HexCoord o={c.r,-c.q-c.r}; return o; }
+HexCoord applyHexRotation(HexCoord c,int steps){
+  steps%=3; if(steps<0)steps+=3;
+  if(steps==1)return rotateHex120(c);
+  if(steps==2)return rotateHex240(c);
+  return c;
+}
+int getHexRing(HexCoord c){ int s=-c.q-c.r; return max(abs(c.q),max(abs(c.r),abs(s))); }
+
+void setMappedPixel(Adafruit_NeoPixel &eye, int index, int hue, int brightness, bool isLeftEye, int rotationSteps) {
+  HexCoord coord = indexToCoord(index);
+  coord = applyHexRotation(coord, rotationSteps);
+  int ledIndex = coordToIndex(coord);
+  if (!isLeftEye && RIGHT_REVERSED) ledIndex = PIXELS_PER_EYE - 1 - ledIndex;
+  eye.setPixelColor(ledIndex, eye.ColorHSV(hue * 256, 255, brightness));
+}
+
+void display_eyes(byte arr[], int hue, int lR, int rR) {
+  display_eye(leftEye, arr, hue, true, lR);
+  display_eye(rightEye, arr, hue, false, rR);
+}
+void display_eye(Adafruit_NeoPixel &eye, byte arr[], int hue, bool isLeftEye, int rotationSteps) {
+  int index = 0;
+  for (int row = 0; row < 7; row++)
+    for (int col = 0; col < rows[row]; col++) {
+      int bv = bitRead(arr[row], isLeftEye ? rows[row]-1-col : col);
+      if (bv) setMappedPixel(eye, index, hue, LED_BRIGHTNESS, isLeftEye, rotationSteps);
+      index++;
+    }
+}
+void display_comfort_eyes(byte arr[], int hue, int lR, int rR) {
+  display_comfort_eye(leftEye, arr, hue, true, lR);
+  display_comfort_eye(rightEye, arr, hue, false, rR);
+}
+void display_comfort_eye(Adafruit_NeoPixel &eye, byte arr[], int hue, bool isLeftEye, int rotationSteps) {
+  int index = 0;
+  for (int row = 0; row < 7; row++)
+    for (int col = 0; col < rows[row]; col++) {
+      int bv = bitRead(arr[row], isLeftEye ? rows[row]-1-col : col);
+      if (bv) setMappedPixel(eye, index, hue, LED_BRIGHTNESS, isLeftEye, rotationSteps);
+      else    setMappedPixel(eye, index, COMFORT_SECOND_HUE, COMFORT_SECOND_BRIGHTNESS, isLeftEye, rotationSteps);
+      index++;
+    }
+}
+void display_tilted_eyes(byte arr[], int hue, int lR, int rR, int td, float ta) {
+  display_tilted_eye(leftEye, arr, hue, true, lR, td, ta);
+  display_tilted_eye(rightEye, arr, hue, false, rR, td, ta);
+}
+void display_tilted_eye(Adafruit_NeoPixel &eye, byte arr[], int hue, bool isLeftEye, int rotationSteps, int tiltDirection, float tiltAmount) {
+  int index = 0;
+  for (int row = 0; row < 7; row++)
+    for (int col = 0; col < rows[row]; col++) {
+      float center = (rows[row]-1)/2.0;
+      float x = col - center;
+      float y = row - 3.0;
+      float sourceX = x - (tiltDirection * y * tiltAmount);
+      int sourceCol = (sourceX+center>=0) ? (int)(sourceX+center+0.5) : (int)(sourceX+center-0.5);
+      int bv = 0;
+      if (sourceCol>=0 && sourceCol<rows[row]) {
+        int pc = isLeftEye ? rows[row]-1-sourceCol : sourceCol;
+        bv = bitRead(arr[row], pc);
       }
-      // If more values are needed, add other lines here, e.g. if (i == 3) ...
+      if (bv) setMappedPixel(eye, index, hue, LED_BRIGHTNESS, isLeftEye, rotationSteps);
+      index++;
     }
+}
+void display_frown_eyes(int hue) {
+  display_eye(leftEye, frown, hue, true, LEFT_FROWN_ROTATION_STEPS);
+  display_tilted_eye(rightEye, frown, hue, false, RIGHT_FROWN_ROTATION_STEPS, RIGHT_FROWN_TILT_DIRECTION, RIGHT_FROWN_TILT_AMOUNT);
+}
+void display_breathing_eyes(int hue, int lR, int rR) {
+  display_breathing_eye(leftEye, hue, true, lR);
+  display_breathing_eye(rightEye, hue, false, rR);
+}
+void display_breathing_eye(Adafruit_NeoPixel &eye, int hue, bool isLeftEye, int rotationSteps) {
+  float wave = getBreathingWave();
+  float breathingRadius = 1.0 + wave * 2.0;
+  int baseB = getBreathingBrightness();
+  for (int index = 0; index < PIXELS_PER_EYE; index++) {
+    HexCoord coord = indexToCoord(index);
+    int ring = getHexRing(coord);
+    float fill = breathingRadius - ring + 1.0;
+    if (fill < 0) fill = 0; if (fill > 1) fill = 1;
+    int b = baseB * fill;
+    if (b > 0) setMappedPixel(eye, index, hue, b, isLeftEye, rotationSteps);
   }
+}
+void display_blink45(int hue, int blinkStage) {
+  display_blink45_eye(leftEye, hue, blinkStage, true, LEFT_BLINK_ROTATION_STEPS);
+  display_blink45_eye(rightEye, hue, blinkStage, false, RIGHT_BLINK_ROTATION_STEPS);
+}
+void display_blink45_eye(Adafruit_NeoPixel &eye, int hue, int blinkStage, bool isLeftEye, int rotationSteps) {
+  int index = 0;
+  for (int row = 0; row < 7; row++)
+    for (int col = 0; col < rows[row]; col++) {
+      int patternCol = isLeftEye ? rows[row]-1-col : col;
+      int diagonalCol = (BLINK45_DIRECTION==1) ? (row*(rows[row]-1)+3)/6 : ((6-row)*(rows[row]-1)+3)/6;
+      int thickness = (blinkStage==1) ? 1 : 0;
+      int bv = abs(patternCol - diagonalCol) <= thickness;
+      if (bv) setMappedPixel(eye, index, hue, LED_BRIGHTNESS, isLeftEye, rotationSteps);
+      index++;
+    }
 }

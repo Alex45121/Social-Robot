@@ -12,8 +12,14 @@ while True:
             state = "LISTENING"
 
     elif state == "LISTENING":
-        detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
-        resposne(HRC.current_emotion)
+        spoken = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
+
+        if spoken:
+            # Understood something → react with the detected emotion
+            resposne(HRC.current_emotion)
+        else:
+            # Didn't understand → stay neutral instead of repeating last emotion
+            resposne("Neutral")
 
         if HRC.current_emotion == "QUIT":
             print("Shutting down")
