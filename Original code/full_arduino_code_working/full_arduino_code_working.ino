@@ -62,6 +62,7 @@ const int LEFT_BREATHE_IN  = 150, RIGHT_BREATHE_IN  = 30;
 const int LEFT_BREATHE_OUT = 90,  RIGHT_BREATHE_OUT = 90;
 unsigned long emotionStartTime = 0;
 const unsigned long EMOTION_DURATION = 5000;
+float anchor1 = 20, anchor2 = 90;
 
 // ---------------- OBJECTS ----------------
 Adafruit_NeoPixel leftEye(PIXELS_PER_EYE, LEFT_LED_PIN);
@@ -193,19 +194,24 @@ void communication() {
     char input = Serial.read();
     input = toupper(input);
 
+    Emotion newEmotion = emotion;
     switch (input) {
-      case 'N': emotion = NEUTRAL;emotionStartTime = millis(); break;    
-      case 'Q': emotion = QUESTIONING; emotionStartTime = millis(); break;
-      case 'C': emotion = COMFORT;     emotionStartTime = millis(); break;
-      case 'H': emotion = HAPPY;       emotionStartTime = millis(); break;
-      case 'S': emotion = SAD;         emotionStartTime = millis(); break;
-      case 'F': emotion = FROWN;       emotionStartTime = millis(); break;
-      case 'B':
-        emotion = BREATHE;
-        breathing_start_time = millis();
-        break;
-      // ignore whitespace / unknown
-      default: break;
+      case 'N': newEmotion = NEUTRAL;     break;
+      case 'Q': newEmotion = QUESTIONING;  break;
+      case 'C': newEmotion = COMFORT;     break;
+      case 'H': newEmotion = HAPPY;       break;
+      case 'S': newEmotion = SAD;         break;
+      case 'F': newEmotion = FROWN;       break;
+      case 'B': newEmotion = BREATHE;     break;
+      default:  return;
+    }
+
+    if (newEmotion != emotion) {
+      emotion = newEmotion;
+      emotionStartTime = millis();    // ← starts the 5-second timer
+      anchor1 = servo1_target;
+      anchor2 = servo2_target;
+      if (emotion == BREATHE) breathing_start_time = millis();
     }
   }
 }
@@ -225,8 +231,12 @@ void touch_sensor() {
       case FROWN:       emotion = BREATHE;     breathing_start_time = millis(); break;
       case BREATHE:     emotion = NEUTRAL;     break;
     }
+    // Set anchor + timer ONCE (applies to whatever emotion we switched to)
+    anchor1 = servo1_target;
+    anchor2 = servo2_target;
+    emotionStartTime = millis();
   }
-  prev_touch_value = touch_value;
+  prev_touch_value = touch_value;   // ← CRITICAL — prevents re-triggering
 }
 
 // ============================================================================
@@ -255,30 +265,29 @@ void update_head() {
     // --- Emotion head gestures ---
     switch (emotion) {
       case HAPPY:
-        servo1_target = 20 + 8.0 * sin(millis() / 500.0);
-        servo2_target = 90 + 15.0 * cos(millis() / 400.0);
+        // Wiggle AROUND where it was looking, not around 20/90
+        servo1_target = anchor1 + 5.0 * sin(millis() / 250.0);
+        servo2_target = anchor2 + 25.0 * cos(millis() / 200.0);
         break;
       case SAD:
-        servo1_target = 35 + 10.0 * cos(millis() / 500.0);
-        servo2_target = 90 + 3.0 * sin(millis() / 400.0);
+        servo1_target = anchor1 + 5.0 + 8.0 * cos(millis() / 500.0);  // droop slightly down from anchor
+        servo2_target = anchor2 + 3.0 * sin(millis() / 400.0);
         break;
       case COMFORT:
-        servo1_target = 25 + 4.0 * sin(millis() / 700.0);
-        servo2_target = 90 + 5.0 * cos(millis() / 700.0);
+        servo1_target = anchor1 + 4.0 * sin(millis() / 700.0);
+        servo2_target = anchor2 + 5.0 * cos(millis() / 700.0);
         break;
       case QUESTIONING:
-        servo1_target = 15;                 // slight look up
-        servo2_target = 90 + 12.0 * sin(millis() / 600.0); // tilt side to side
+        servo1_target = anchor1 - 5.0;   // tilt up a bit from where it was
+        servo2_target = anchor2 + 12.0 * sin(millis() / 600.0);
         break;
       case FROWN:
-        servo1_target = 40;                 // look down
-        servo2_target = 90;
+        servo1_target = anchor1 + 15.0;  // look down relative to anchor
+        servo2_target = anchor2;
         break;
       case BREATHE:
-        servo1_target = 20;                 // steady, calm
-        servo2_target = 90;
-        break;
-      default:
+        servo1_target = anchor1;         // hold where it was
+        servo2_target = anchor2;
         break;
     }
   }
