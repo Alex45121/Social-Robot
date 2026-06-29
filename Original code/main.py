@@ -2,31 +2,18 @@ import time
 from HRC import detect_intent_voice, PROJECT_ID, SESSION_ID, LANGUAGE, resposne, is_face_detected
 import HRC
 
-state = "IDLE"
-print("Robot is ready! Looking for a face...")
+print("Robot is ready! Listening for conversation...")
 
 while True:
-    if state == "IDLE":
-        if is_face_detected():
-            print("👀 Face detected → start listening")
-            state = "LISTENING"
+    spoken = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
 
-    elif state == "LISTENING":
-        spoken = detect_intent_voice(PROJECT_ID, SESSION_ID, LANGUAGE)
+    if spoken:
+        resposne(HRC.current_emotion)
+    else:
+        resposne("Neutral")
 
-        if spoken:
-            # Understood something → react with the detected emotion
-            resposne(HRC.current_emotion)
-        else:
-            # Didn't understand → stay neutral instead of repeating last emotion
-            resposne("Neutral")
-
-        if HRC.current_emotion == "QUIT":
-            print("Shutting down")
-            break
-
-        if not is_face_detected():
-            print("🚶 Person left → back to idle")
-            state = "IDLE"
+    if HRC.current_emotion == "QUIT":
+        print("Shutting down")
+        break
 
     time.sleep(0.05)

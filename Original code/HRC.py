@@ -89,12 +89,11 @@ def resposne(emotion):
         "Neutral":  "N",   # Neutral
         "Angry":    "F",   # angry user → robot Frawn
         "Scared":   "C",   # scared user → robot Comforts
-        "Sad":      "C",   # sad user → robot Comforts
+        "Sad":      "S",   # sad user → robot Comforts
         "Question": "Q",   # Questioning
         "Welcome":  "H",   # welcome → Happy
         "QUIT":     "N"    # quit → Neutral
     }
-
     letter = arduino_letter.get(emotion, "N")
     if ser:
         message = f"{letter}\n"
@@ -107,6 +106,19 @@ def resposne(emotion):
         speak_beeps(current_fulfillment, robot_emotion, out_path="robot_reply.wav")
     else:
         print("⚠️ No fulfillment text to speak")
+
+    # After a comforting response, guide into a breathing exercise
+    if ser and letter == "C":
+        time.sleep(4)                  # let comfort play first (Arduino auto-returns at 5s)
+        ser.write(b"B\n")
+        print("📡 Sent to Arduino: B (breathing after comfort)")
+    if ser and letter == "S":
+        time.sleep(4)                  # let comfort play first (Arduino auto-returns at 5s)
+        ser.write(b"C\n")
+        print("📡 Sent to Arduino: C (Comforting After sad)")
+        time.sleep(4) 
+        ser.write(b"B\n")
+        print("📡 Sent to Arduino: B (breathing after comfort)")
 
     # Send just the LETTER to Arduino
     
