@@ -84,3 +84,7 @@ Alexander, Emma, Anna and Madeleine.
 My part (Alexander Kralev): the speech and sound side (speech recognition, linking Dialogflow emotions to the robot's reactions, and the beep speech), the camera and face tracking, and work on the Arduino code and the hardware, including the pan-tilt head.
 
 `huskylib.py` is DFRobot's HuskyLens Python library and is included unchanged.
+
+## Use of AI
+
+AI tools were used to help debug and check the code. All the ideas, the design of the experiments and the execution are our own.
